@@ -27,10 +27,15 @@ class WatcherService : Service() {
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> onScreenOff()
-                Intent.ACTION_SCREEN_ON -> onScreenOn()
-            }
+            // An exception escaping onReceive takes the whole process down, and
+            // START_STICKY then restarts it looking healthy while having done
+            // nothing. Contain failures here instead.
+            runCatching {
+                when (intent.action) {
+                    Intent.ACTION_SCREEN_OFF -> onScreenOff()
+                    Intent.ACTION_SCREEN_ON -> onScreenOn()
+                }
+            }.onFailure { Log.e(TAG, "handling ${intent.action} failed", it) }
         }
     }
 
@@ -94,15 +99,39 @@ class WatcherService : Service() {
         val triggerAt = SystemClock.elapsedRealtime() + Prefs.delayMillis(this)
         val am = getSystemService(AlarmManager::class.java)
 
-        // setExactAndAllowWhileIdle is the only variant that survives Doze.
-        // Doze is precisely the state we are waiting through, so setExact or
-        // a plain Handler would be deferred to an unpredictable time.
-        am.setExactAndAllowWhileIdle(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            triggerAt,
-            alarmIntent()
+        // Both variants pass ...AllowWhileIdle because Doze is precisely the
+        // state being waited through; a plain setExact or a Handler would be
+        // deferred to an unpredictable time.
+        //
+        // canScheduleExactAlarms must be checked first: without the permission
+        // setExactAndAllowWhileIdle throws SecurityException, which killed the
+        // receiver and left no alarm scheduled at all. Inexact still fires,
+        // just with OS-chosen slack, so degrade rather than fail.
+        val exact = am.canScheduleExactAlarms()
+        try {
+            if (exact) {
+                am.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, alarmIntent()
+                )
+            } else {
+                Log.w(TAG, "no exact-alarm permission; falling back to inexact")
+                am.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, alarmIntent()
+                )
+            }
+        } catch (e: SecurityException) {
+            // Belt and braces: OEM builds have been known to deny this even
+            // when canScheduleExactAlarms() returns true.
+            Log.e(TAG, "exact alarm refused; falling back to inexact", e)
+            am.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, alarmIntent()
+            )
+        }
+
+        val suffix = if (exact) "" else " (approx)"
+        updateNotification(
+            "Screen off — airplane mode in ${Prefs.delayMinutes(this)} min$suffix"
         )
-        updateNotification("Screen off — airplane mode in ${Prefs.delayMinutes(this)} min")
     }
 
     private fun onScreenOn() {

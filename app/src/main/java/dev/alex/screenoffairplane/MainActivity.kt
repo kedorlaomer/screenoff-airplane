@@ -2,6 +2,7 @@ package dev.alex.screenoffairplane
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlarmManager
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.Gravity
@@ -106,11 +107,14 @@ class MainActivity : Activity() {
             } else "?"
 
             val watcher = if (WatcherService.isRunning(this)) "Watcher: running" else "Watcher: stopped"
+            val alarms = if (getSystemService(AlarmManager::class.java).canScheduleExactAlarms())
+                "Exact alarms: yes" else "Exact alarms: NO (timing will be approximate)"
 
             runOnUiThread {
                 status.text = buildString {
                     appendLine(watcher)
                     appendLine(shizuku)
+                    appendLine(alarms)
                     appendLine()
                     appendLine("Airplane mode: $air")
                     appendLine("Tethering: $clients")
