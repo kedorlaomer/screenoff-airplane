@@ -75,6 +75,25 @@ stale ARP noise. Entries are deduped by MAC, since one client appears as both v4
 and v6. If the neighbour check fails the guard **fails safe** and assumes clients
 are present rather than cutting someone off.
 
+## Wi-Fi
+
+Airplane mode always takes Wi-Fi down, and Android brings it back when
+airplane mode is turned off. The Wi-Fi setting picks what happens around that:
+
+| Mode | Behaviour |
+| --- | --- |
+| `RESTORE` (default) | Wi-Fi drops with airplane mode and Android restores it. No action taken. |
+| `KEEP_OFF` | Revert airplane mode on screen-on, then switch Wi-Fi back off, so only cellular returns. |
+| `ON_DURING` | Re-enable Wi-Fi after airplane mode engages, so only the cellular radios stay off. |
+
+Wi-Fi is driven by `cmd wifi set-wifi-enabled`, which — unlike
+`list-tethered-clients` — is permitted for the shell uid.
+
+Both non-default modes wait 3 s (`WIFI_SETTLE_MS`) before touching Wi-Fi.
+Android's automatic restore races an explicit change and wins if it lands last.
+That delay is set from observed behaviour, not tuned; if a mode misbehaves it is
+the first thing to check.
+
 ## Setup
 
 1. Install Shizuku and start it (see below).
@@ -158,11 +177,33 @@ Verified on-device:
 
 - Airplane mode enable/disable, with radios confirmed down
   (`mRadioPowerState=0`, pings failing) and cleanly restored.
+- The full screen-off -> timer -> airplane-on -> screen-on -> revert cycle.
+- Exact alarms schedule with `window=0` and
+  `exactAllowReason=policy_permission`, undeferred by Doze (`device_idle=--`).
 - Hotspot parsing, unit-tested against real captured `dumpsys tethering` and
   `ip neigh` output: interface extraction with both cellular and Wi-Fi upstream,
   hotspot-off, v4+v6 dedupe to one MAC, `FAILED` entries ignored.
-- Builds, installs, launches without crashing; Shizuku grants the binder.
+- `cmd wifi set-wifi-enabled` works at shell uid, both directions.
 
-**Not yet verified end-to-end:** the screen-off -> 5 min -> toggle path, the
-stop/revert path, and boot restart. A non-exported service cannot be started
-from a shell, so these need the on-screen buttons and have not been exercised.
+Not yet verified:
+
+- The `KEEP_OFF` and `ON_DURING` Wi-Fi modes. They only run on a real
+  screen-off cycle and the default path does nothing, so no evidence yet.
+- The stop/revert path and boot restart.
+- The hotspot guard actually skipping a toggle with clients connected. The
+  parsing is tested; the skip in context is not.
+
+### A note on logcat
+
+The log ring buffer is 256 KiB and this device is very chatty (~11k lines in
+9 minutes). `SoA.` lines are evicted within a minute or two, which already
+caused one wrong conclusion that the timer had never fired. Prefer the
+persistent state when checking what happened:
+
+```sh
+rish -c 'run-as dev.alex.screenoffairplane cat \
+  /data/data/dev.alex.screenoffairplane/shared_prefs/prefs.xml'
+```
+
+`we_enabled_it=false` with `enabled=true` means a full cycle ran and reverted.
+There is no persistent event log; overnight behaviour cannot be reconstructed.

@@ -10,6 +10,8 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import rikka.shizuku.Shizuku
 import kotlin.concurrent.thread
@@ -42,6 +44,26 @@ class MainActivity : Activity() {
             }
         }
         root.addView(guard)
+
+        root.addView(TextView(this).apply {
+            text = "Wi-Fi"
+            setPadding(0, 32, 0, 8)
+        })
+
+        val wifiGroup = RadioGroup(this)
+        Prefs.WifiPolicy.entries.forEach { policy ->
+            wifiGroup.addView(RadioButton(this).apply {
+                id = policy.ordinal + 100
+                text = policy.label
+                isChecked = Prefs.wifiPolicy(this@MainActivity) == policy
+            })
+        }
+        wifiGroup.setOnCheckedChangeListener { _, id ->
+            Prefs.WifiPolicy.entries.getOrNull(id - 100)?.let {
+                Prefs.setWifiPolicy(this@MainActivity, it)
+            }
+        }
+        root.addView(wifiGroup)
 
         root.addView(Button(this).apply {
             text = "Grant Shizuku permission"
@@ -99,6 +121,7 @@ class MainActivity : Activity() {
         thread(isDaemon = true) {
             val shizuku = ShizukuGate.status()
             val air = if (ShizukuGate.ready()) Airplane.get().name else "?"
+            val wifi = if (ShizukuGate.ready()) Wifi.get().name else "?"
             val clients = if (ShizukuGate.ready()) {
                 val ifaces = Hotspot.tetheredInterfaces()
                 if (ifaces.isEmpty()) "hotspot off"
@@ -117,6 +140,7 @@ class MainActivity : Activity() {
                     appendLine(alarms)
                     appendLine()
                     appendLine("Airplane mode: $air")
+                    appendLine("Wi-Fi: $wifi")
                     appendLine("Tethering: $clients")
                     appendLine()
                     appendLine("Delay: ${Prefs.delayMinutes(this@MainActivity)} min after screen off")

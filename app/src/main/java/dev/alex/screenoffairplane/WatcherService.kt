@@ -145,6 +145,7 @@ class WatcherService : Service() {
             worker {
                 val ok = Airplane.set(false)
                 Prefs.setWeEnabledIt(this, false)
+                applyWifiPolicyOnScreenOn()
                 updateNotification(
                     if (ok) "Watching screen state" else "Failed to restore radios — check Shizuku"
                 )
@@ -176,7 +177,41 @@ class WatcherService : Service() {
             val ok = Airplane.set(true)
             Prefs.setWeEnabledIt(this, ok)
             Log.i(TAG, "airplane mode enabled: $ok")
+
+            if (ok && Prefs.wifiPolicy(this) == Prefs.WifiPolicy.ON_DURING) {
+                // Airplane mode has just taken Wi-Fi down; bring it back so
+                // only the cellular radios stay off. Needs a moment or the
+                // enable races the teardown and is undone.
+                Thread.sleep(WIFI_SETTLE_MS)
+                val wifiOk = Wifi.set(true)
+                Log.i(TAG, "wifi re-enabled during screen-off: $wifiOk")
+            }
+
             updateNotification(if (ok) "Airplane mode on (screen off)" else "Failed to enable — check Shizuku")
+        }
+    }
+
+    /**
+     * Wi-Fi handling after airplane mode is reverted.
+     *
+     * Android brings Wi-Fi back by itself when airplane mode is turned off,
+     * which is the RESTORE default and needs no action. KEEP_OFF has to wait
+     * for that automatic restore before switching it back off, otherwise the
+     * restore lands afterwards and wins.
+     */
+    private fun applyWifiPolicyOnScreenOn() {
+        when (Prefs.wifiPolicy(this)) {
+            Prefs.WifiPolicy.RESTORE -> Unit
+
+            Prefs.WifiPolicy.KEEP_OFF -> {
+                Thread.sleep(WIFI_SETTLE_MS)
+                val ok = Wifi.set(false)
+                Log.i(TAG, "wifi left off per policy: $ok")
+            }
+
+            // Wi-Fi was re-enabled while the screen was off, so it is already
+            // on and the airplane-mode revert does not change that.
+            Prefs.WifiPolicy.ON_DURING -> Unit
         }
     }
 
@@ -243,6 +278,9 @@ class WatcherService : Service() {
         private const val CHANNEL_ID = "watcher"
         private const val NOTIF_ID = 1
         private const val TAG = "SoA.Watcher"
+
+        /** Time for the airplane-mode transition to settle before touching Wi-Fi. */
+        private const val WIFI_SETTLE_MS = 3000L
 
         fun start(context: Context) {
             val intent = Intent(context, WatcherService::class.java)
