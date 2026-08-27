@@ -1,0 +1,9 @@
+build/
+.gradle/
+# Machine-specific SDK path.
+local.properties
+*.apk
+.DS_Store
+.idea/
+*.iml
+captures/
